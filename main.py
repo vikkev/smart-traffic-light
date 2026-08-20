@@ -59,15 +59,20 @@ def extrair_deteccoes(results):
     return list(zip(caixas[:, 0], caixas[:, 1], caixas[:, 2], caixas[:, 3], ids, classes))
 
 def atualizar_contagem(deteccoes, y_linha, estado_anterior, contagem):
-    # Contagem por transição de lado: contar a cada mudança de lado detectada
-    # sem marcar permanentemente o ID como 'contado' — permite múltiplos cruzamentos
+    # Contagem por transição de lado: cada objeto é identificado apenas por um ID
+    # temporário do tracker para a sessão atual. Não persistimos identidade pessoal.
     for x1, y1, x2, y2, id_rastreio, id_classe in deteccoes:
+        nome = ID_PARA_NOME.get(id_classe)
+        if nome is None:
+            # Ignora classes fora do conjunto técnico necessário para o monitoramento
+            # de fluxo de tráfego, sem afetar tracking de objetos válidos.
+            continue
+
         centro_y = (y1 + y2) / 2
         lado_atual = -1 if centro_y < y_linha else 1
         lado_anterior = estado_anterior.get(id_rastreio)
 
         if lado_anterior is not None and lado_atual != lado_anterior:
-            nome = ID_PARA_NOME.get(id_classe, str(id_classe))
             contagem[nome] = contagem.get(nome, 0) + 1
         estado_anterior[id_rastreio] = lado_atual
 
@@ -258,7 +263,9 @@ def main(source, model_path, conf=None, resize=None):
                 except Exception:
                     scale = 1.0
 
-            results = model.track(proc_frame, persist=True, classes=IDS_CLASSES, 
+            # Tracking temporário somente para sustentar a contagem por linha e
+            # evitar duplicação dentro do processamento do vídeo atual.
+            results = model.track(proc_frame, persist=False, classes=IDS_CLASSES,
                                   conf=conf_val, verbose=False)[0]
 
             deteccoes = extrair_deteccoes(results)

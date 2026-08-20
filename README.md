@@ -33,6 +33,15 @@
 
 Este é um protótipo inteligente para monitorar cruzamentos de forma contínua e eficiente. A ideia é simples: usar câmeras e **visão computacional** (YOLOv8) para entender o fluxo real de veículos nos cruzamentos, detectar padrões de tráfego (normal, congestionado ou crítico) e ajustar os semáforos automaticamente. Funciona com webcam, vídeo ou câmeras IP via RTSP, e tudo foi desenvolvido pensando em robustez e facilidade de teste.
 
+## Identificação técnica e LGPD
+
+A identificação usada neste sistema é exclusivamente técnica e temporária para acompanhar objetos entre frames, validar cruzamento de linha e evitar contagem duplicada. Não há reconhecimento facial, OCR de placas, identificação de proprietários, perfis individuais de veículos ou armazenamento de dados pessoais.
+
+- Processamento local, sem envio para APIs ou serviços de terceiros.
+- Nenhum rosto, placa, vídeo ou imagem é armazenado.
+- Os resultados são agregados em estatísticas de tráfego, por exemplo: 14:30 → 18 carros, 4 motos, 2 caminhões.
+- A finalidade é análise e melhoria do fluxo de tráfego, sem identificação individual.
+
 ---
 
 ## Principais funcionalidades
@@ -315,4 +324,8 @@ Abra uma [Issue](https://github.com/vikkev/smart-traffic-light/issues) no reposi
 
 **Desenvolvido em Marília, SP**
 
+<<<<<<< HEAD
 </div>
+=======
+</div>
+>>>>>>> 1404883 (adequacao-LGPD)

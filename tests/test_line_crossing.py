@@ -79,3 +79,18 @@ def test_multi_object_and_classes():
     assert contagem.get('car', 0) == 1
     assert contagem.get('bus', 0) == 1
     assert contagem.get('person', 0) == 1
+
+
+def test_unknown_classes_are_ignored_for_counting():
+    y_linha = 100
+    estado = {}
+    contagem = {}
+
+    dets = [
+        make_det(80, track_id=10, cls_id=99),
+        make_det(120, track_id=10, cls_id=99),
+    ]
+
+    atualizar_contagem(dets, y_linha, estado, contagem)
+
+    assert contagem == {}
