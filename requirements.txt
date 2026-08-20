@@ -1,0 +1,5 @@
+pytest
+numpy
+opencv-python
+# ultralytics is optional for runtime; install when running full pipeline
+# ultralytics
