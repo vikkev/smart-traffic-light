@@ -7,9 +7,9 @@
 [![Python](https://img.shields.io/badge/python-3.10+-blue.svg)](https://www.python.org/downloads/)
 [![YOLOv8](https://img.shields.io/badge/YOLOv8-Ultralytics-00FFFF.svg)](https://github.com/ultralytics/ultralytics)
 [![Licença](https://img.shields.io/badge/License-Apache-yellow.svg)](https://www.apache.org/licenses/LICENSE-2.0)
-[![Status](https://img.shields.io/badge/Status-Produção-brightgreen.svg)]()
+[![Status](https://img.shields.io/badge/Status-Protótipo_laboratório-yellow.svg)]()
 
-<h4>Detecção, tracking e contagem de veículos e pedestres em tempo real com classificação inteligente de demanda de tráfego usando YOLOv8.</h4>
+<h4>Protótipo de laboratório: YOLOv8 + contagem de fluxo e tempos semafóricos simulados (Webster, 2 fases).</h4>
 
 <p>Versão otimizada — Marília, 2026</p>
 
@@ -31,16 +31,47 @@
 
 ## Sobre este projeto
 
-Este é um protótipo inteligente para monitorar cruzamentos de forma contínua e eficiente. A ideia é simples: usar câmeras e **visão computacional** (YOLOv8) para entender o fluxo real de veículos nos cruzamentos, detectar padrões de tráfego (normal, congestionado ou crítico) e ajustar os semáforos automaticamente. Funciona com webcam, vídeo ou câmeras IP via RTSP, e tudo foi desenvolvido pensando em robustez e facilidade de teste.
+Protótipo de **laboratório** (TCC): câmera ou vídeo + **YOLOv8** para contar o fluxo, e um controlador **simulado** que calcula tempos de verde pelo método de Webster. Não é implantação municipal, malha semafórica nem prova de redução de crime.
+
+Funciona com webcam, arquivo de vídeo ou RTSP. Relato do que mudou nesta etapa: [`ALTERACOES.md`](ALTERACOES.md).
+
+### Escopo do protótipo
+
+**Inclui**
+- Detecção e classificação com **YOLOv8** (Ultralytics / PyTorch). Não usamos YOLOv3/v4 nem TensorFlow.
+- Contagem por travessia de linha e status de demanda (`NORMAL` / `BUSY` / `PRIORIDADE`).
+- Semáforo simulado de **2 fases**. Fase A = via da câmera. Fase B usa demanda fixa `Y_B = 0.20` porque só há uma câmera — o outro braço do cruzamento **não é medido**.
+- Log de laboratório em `logs/metricas.jsonl` **somente** na troca de fase ou de ciclo (não a cada frame).
+
+**Não inclui** (trabalho futuro / texto da monografia, não desta entrega)
+- Controlador físico, 4G/5G, malha da cidade, servidor preditivo, aprendizado por reforço.
+- Análise geoespacial SSP-SP/CET operacional.
+- Difference-in-Differences (DiD) e metas de 12 meses da Tabela 1 da monografia (`≥20%` espera, `≥95%` detecção). O JSONL mede latência e tempos de ciclo neste protótipo; não afirma essas metas.
+- Prova causal de que menos espera reduz crime.
+
+### Constantes Webster
+
+| Constante | Valor | Significado |
+|-----------|-------|-------------|
+| `L` (`TEMPO_PERDIDO`) | 8 s | 2 fases × (~3 s âmbar + 1 s all-red) |
+| `TEMPO_AMARELO` | 3 s | Duração de cada âmbar |
+| `Y_B` | 0.20 | Demanda fixa da fase complementar |
+| `Y_A` | 0.10–0.85 | Razão da via observada (pela pontuação de demanda) |
+| `Y_MAX` | 0.90 | Teto de saturação; acima disso o estado é `SOBRECARREGADO` e o ciclo não explode |
+| Verde | 8–60 s | Clamp de cada fase |
+
+Fórmula: `C = (1.5L + 5) / (1 − Y)`; `g_a = (y_a / Y)(C − L)`, depois os clamps. Demanda nova **não** corta o verde atual; entra só no **próximo** ciclo.
 
 ## Identificação técnica e LGPD
 
-A identificação usada neste sistema é exclusivamente técnica e temporária para acompanhar objetos entre frames, validar cruzamento de linha e evitar contagem duplicada. Não há reconhecimento facial, OCR de placas, identificação de proprietários, perfis individuais de veículos ou armazenamento de dados pessoais.
+A **Lei Geral de Proteção de Dados** (LGPD, Lei nº 13.709/2018) regula o uso de dados que identifiquem uma pessoa. Este protótipo trata imagem só para **contar veículos e estimar fluxo**. Não identifica motorista, passageiro, placa nem rosto.
 
-- Processamento local, sem envio para APIs ou serviços de terceiros.
-- Nenhum rosto, placa, vídeo ou imagem é armazenado.
-- Os resultados são agregados em estatísticas de tráfego, por exemplo: 14:30 → 18 carros, 4 motos, 2 caminhões.
-- A finalidade é análise e melhoria do fluxo de tráfego, sem identificação individual.
+- Processamento local: o vídeo não é enviado a API de terceiros.
+- A imagem **não é gravada**. Depois do frame, resta só número agregado (ex.: 18 carros, 4 motos).
+- O `track_id` do YOLO existe só enquanto o programa roda, para não contar o mesmo objeto duas vezes. Não é cadastro de pessoa ou veículo.
+- Finalidade: gestão de tráfego simulada no laboratório, não vigilância.
+
+Quem lê o TCC sem ser da área: a câmera aqui é um **sensor de volume**, não um sistema de reconhecimento.
 
 ---
 
@@ -48,14 +79,24 @@ A identificação usada neste sistema é exclusivamente técnica e temporária p
 
 | Funcionalidade | Descrição |
 |---|---|
-| **Detecção + Tracking** | YOLOv8 com rastreamento persistente de objetos |
+| **Detecção + Tracking** | YOLOv8 com rastreamento persistente na sessão (`persist=True`) |
 | **Contagem inteligente** | Line-crossing com deduplicação de frames repetidos |
 | **Classificação de demanda** | NORMAL / BUSY / PRIORIDADE baseado em pesos por classe |
+| **Webster simulado** | 2 fases, recálculo só no próximo ciclo, estado `SOBRECARREGADO` |
+| **Painel de resumo** | Split 65/35 (câmera + painel); tecla `I` esconde/mostra |
+| **Métricas de laboratório** | JSONL na troca de fase/ciclo (`latencia_ms`, verdes, ciclo) |
 | **Múltiplas fontes** | Webcam, vídeo local, streams RTSP |
 | **Probe de câmeras** | Auto-detecção de backends (DSHOW/MSMF/ANY no Windows) |
 | **Performance** | Suporte a redimensionamento de imagem (`--resize`) para CPU |
 | **Fullscreen adaptável** | Toggle por tecla `f` com fallback F11 |
-| **Testes unitários** | Cobertura pytest para lógica de demanda e line-crossing |
+| **Testes unitários** | Demanda, contagem, Webster e `alternar_painel` |
+
+### Tela e teclas
+
+- Ao abrir: câmera à esquerda (~65%) + painel de resumo à direita (~35%) com semáforo visual e textos em português claro.
+- **I** — esconde ou mostra o painel (câmera continua rodando; com painel oculto fica tela cheia).
+- **Q** ou **Esc** — sair.
+- **F** — tela cheia da janela.
 
 ### Sistema de demanda ponderada
 
@@ -188,10 +229,12 @@ python main.py --source 0 --model /caminho/para/seu_modelo.pt
 | Opção | Padrão | Descrição |
 |-------|--------|-----------|
 | `--source` | `0` | ID da câmera, caminho de vídeo ou URL RTSP |
-| `--model` | `yolov8m.pt` | Modelo local ou nome que Ultralytics resolve |
-| `--conf` | `0.5` | Limiar de confiança (0–1) |
+| `--model` | `yolov8s.pt` | Modelo YOLOv8 local ou nome que Ultralytics resolve |
+| `--conf` | `0.4` | Limiar de confiança (0–1); CLI sobrepõe o padrão |
 | `--resize` | `None` | Redimensiona a maior dimensão (ex: 640) |
 | `--probe` | `False` | Testa backends e índices de câmera |
+| `--log-path` | `logs/metricas.jsonl` | Destino do log (só fase/ciclo) |
+| `--sem-log-metricas` | `False` | Desliga o JSONL |
 
 ---
 
@@ -209,13 +252,12 @@ Isso executa toda a suite de testes e mostra o resultado.
 
 | Arquivo | O que valida |
 |---------|-----------|
-| `test_traffic_manager.py` | Se o cálculo de demanda e classificação funcionam certo |
-| `test_line_crossing.py` | Se a contagem de veículos por line-crossing está correta |
-
-Se quer rodar um teste específico:
+| `test_trafego.py` | Demanda, status, Webster (clamps, recálculo, ciclo completo) |
+| `test_contagem.py` | Contagem por line-crossing |
+| `test_painel.py` | Tecla de esconder/mostrar painel (`alternar_painel`) |
 
 ```sh
-pytest tests/test_traffic_manager.py::test_demand_calculation -v
+pytest tests/test_trafego.py::test_ciclo_completo_de_fases -v
 ```
 
 ---
@@ -229,13 +271,19 @@ pytest tests/test_traffic_manager.py::test_demand_calculation -v
 | **Opção `--resize`** | Acelera inferência em CPU |
 | **Probe de backends** | Auto-detecção de câmeras no Windows |
 | **Cleanup robusto** | Proteção contra exceções secundárias (release/destroyAllWindows) |
-| **Contagem inteligente** | Rastreamento de estado anterior; elimina double-counting de frames repetidos |
+| **Webster 2 fases** | Tempos simulados + painel de resumo |
+| **Painel minimizável** | Split 65/35; tecla `I` esconde/mostra |
+| **Log JSONL** | Só na transição de fase/ciclo; não distorce latência por I/O a cada frame |
 
 ---
 
 ## Limitações conhecidas
 
-**Re-ID persistente não implementado:** Se o tracker perde e reatribui `track_id`, o evento será contado como novo. Isso é aceitável para contagem de eventos, mas persistência real requer um modelo adicional.
+**Re-ID persistente entre sessões não implementado:** Se o tracker perde e reatribui `track_id`, o evento será contado como novo.
+
+**Fase B não observada:** `Y_B = 0.20` é hipótese de laboratório. Cruzamento real exigiria segunda câmera ou outro sensor.
+
+**Semáforo é simulação:** nenhum comando vai para hardware de campo.
 
 **cv2.imshow requer interface gráfica:** Não funciona em ambientes headless (sem X/Wayland).
 
@@ -265,16 +313,23 @@ pytest tests/test_traffic_manager.py::test_demand_calculation -v
 
 ```
 smart-traffic-light/
-├── main.py                          # Entry point do pipeline
-├── requirements.txt                 # Dependências
-├── tests/
-│   ├── test_traffic_manager.py     # Testes de demanda
-│   └── test_line_crossing.py       # Testes de contagem
+├── main.py                 # CLI + loop da câmera
+├── requirements.txt
+├── ALTERACOES.md
+├── README.md
 ├── src/
-│   ├── traffic_manager.py          # Lógica de demanda e status
-│   ├── line_crossing.py            # Detecção de travessia
-│   └── utils.py                    # Funções auxiliares
-└── README.md
+│   ├── config.py           # pesos, Webster, nomes em PT
+│   ├── trafego.py          # demanda + ControladorSemaforo
+│   ├── visao.py            # detecção / contagem
+│   ├── metricas.py         # log JSONL
+│   └── ui/
+│       └── painel.py       # split + painel minimizável
+├── tests/
+│   ├── test_trafego.py
+│   ├── test_contagem.py
+│   └── test_painel.py
+├── logs/                   # metricas.jsonl (runtime)
+└── samples/                # vídeos de teste (opcional)
 ```
 
 ---
@@ -285,9 +340,10 @@ smart-traffic-light/
 
 | Princípio | Implementação |
 |-----------|---------------|
-| **Minimização de dados** | Apenas dados de tráfego; sem identificação de pessoas |
-| **Finalidade específica** | Imagens utilizadas exclusivamente para gestão de tráfego |
-| **Segurança da informação** | Dados protegidos por criptografia e controle de acesso |
+| **Minimização** | Só totais por classe; sem PII |
+| **Finalidade** | Fluxo de tráfego no laboratório |
+| **Não armazenamento de imagem** | Frame descartado após o processamento |
+| **Segurança** | Processo local; JSONL sem identificadores |
 
 ---
 
@@ -295,7 +351,7 @@ smart-traffic-light/
 
 | Métrica | CPU | GPU (CUDA) |
 |--------|-----|-----------|
-| **Latência (YOLOv8m)** | ~100–150ms | ~15–30ms |
+| **Latência (YOLOv8s)** | ~100–150ms | ~15–30ms |
 | **FPS** | 6–10 | 30–60 |
 | **Memória** | ~800MB | ~2GB |
 
@@ -324,8 +380,5 @@ Abra uma [Issue](https://github.com/vikkev/smart-traffic-light/issues) no reposi
 
 **Desenvolvido em Marília, SP**
 
-<<<<<<< HEAD
 </div>
-=======
-</div>
->>>>>>> 1404883 (adequacao-LGPD)
+
