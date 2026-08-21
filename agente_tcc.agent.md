@@ -133,7 +133,20 @@ Simplificações deliberadas são permitidas quando adequadas à escala atual, m
 * `> 8` → `BUSY`
 * `≤ 8` → `NORMAL`
 
-Manter sincronizado com `main.py`.
+### Webster (simulado)
+
+* `L = 8`, `Y_B = 0.20`, `Y_MAX = 0.90`, verde `8–60` s
+* Fases: `VERDE_A` → `AMARELO_A` → `VERDE_B` → `AMARELO_B`
+* Recalcular só no próximo ciclo
+* Log JSONL só em mudança de fase/ciclo
+
+### UI
+
+* Split 65/35 em `src/ui/painel.py`
+* Tecla `I` → `alternar_painel`
+* `main.py` só CLI + loop
+
+Manter sincronizado com `src/`.
 
 ## Autonomia
 
