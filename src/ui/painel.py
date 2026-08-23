@@ -20,8 +20,6 @@ def formatar_contagem(n, singular, plural):
 
 def desenhar_texto_ajustado(img, texto, pos, fonte, escala_inicial, cor, espessura, largura_max_px):
     import cv2
-
-    aa = cv2.LINE_AA
     escala = float(escala_inicial)
     desenho = texto
     while True:

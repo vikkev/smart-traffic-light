@@ -44,7 +44,6 @@ G_MAX = 60.0
 DEMANDA_SATURACAO = 20.0
 FASES = ("VERDE_A", "AMARELO_A", "VERDE_B", "AMARELO_B")
 
-FRACAO_CAMERA = 0.68  # legado; HUD agora é overlay (sem split)
 FONTE_MIN_ESCALA = 0.45
 STATUS_PT = {
     "NORMAL": "Tranquilo",

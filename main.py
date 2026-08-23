@@ -18,7 +18,14 @@ from src.ui.painel import alternar_painel, desenhar_camera, montar_frame
 from src.visao import atualizar_contagem, extrair_deteccoes
 
 
-def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path="logs/metricas.jsonl"):
+def fonte_com_retry_for(source_to_open):
+    """Retorna True se a fonte deve usar o mecanismo de retry (câmera local ou RTSP)."""
+    return isinstance(source_to_open, int) or (
+        isinstance(source_to_open, str) and source_to_open.lower().startswith("rtsp")
+    )
+
+
+def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path="logs/metricas.jsonl", max_frames=None):
     if not model_path:
         print("ERRO: O modelo (model) não foi especificado.")
         sys.exit(1)
@@ -36,10 +43,42 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
 
     try:
         import cv2
-        from ultralytics import YOLO
+    except Exception as e:
+        print(f"ERRO: falha ao importar OpenCV (cv2): {e}")
+        raise
 
-        model = YOLO(model_path)
+    # Carregamento do modelo YOLO — mensagens claras para falhas conhecidas
+    class _DummyModel:
+        def track(self, *args, **kwargs):
+            # simula resultado sem detecções
+            class R:
+                boxes = None
 
+            return [R()]
+
+    try:
+        try:
+            from ultralytics import YOLO
+            ULTRALYTICS_AVAILABLE = True
+        except Exception:
+            ULTRALYTICS_AVAILABLE = False
+            print("AVISO: biblioteca 'ultralytics' não encontrada. O pipeline continuará em modo reduzido (sem detecções).")
+
+        if ULTRALYTICS_AVAILABLE:
+            try:
+                model = YOLO(model_path)
+            except FileNotFoundError:
+                print(f"ERRO: arquivo de modelo '{model_path}' não foi encontrado.")
+                sys.exit(1)
+            except Exception as e:
+                print(f"ERRO: falha ao carregar o modelo '{model_path}': {e}")
+                raise
+        else:
+            model = _DummyModel()
+    except Exception:
+        raise
+
+    try:
         source_to_open = source
         try:
             if isinstance(source, str) and source.isdigit():
@@ -89,9 +128,16 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
         controlador = ControladorSemaforo()
         estado_anterior, contagem = {}, {}
         ultimo_tick = time.monotonic()
+        # Para poda de track_ids que não aparecem faz tempo
+        ultimo_visto = {}
+        frame_idx = 0
+        N_FRAMES_PRUNE = 300
         painel_visivel = True
 
         fonte_eh_camera = isinstance(source_to_open, int)
+        fonte_com_retry = fonte_eh_camera or (
+            isinstance(source_to_open, str) and source_to_open.lower().startswith("rtsp")
+        )
         falhas_leitura = 0
         nome_janela = "Monitoramento Inteligente - TCC"
 
@@ -100,10 +146,37 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
 
         cv2.namedWindow(nome_janela, cv2.WINDOW_NORMAL)
         fullscreen = False
+        try:
+            import numpy as _np
+            # criar frame preto mínimo para forçar abertura da janela
+            _h, _w = 480, 640
+            _blank = _np.zeros((_h, _w, 3), dtype=_np.uint8)
+            try:
+                cv2.imshow(nome_janela, _blank)
+                cv2.waitKey(1)
+                try:
+                    cv2.setWindowProperty(nome_janela, cv2.WND_PROP_TOPMOST, 1)
+                except Exception:
+                    pass
+            except Exception:
+                pass
+        except Exception:
+            pass
 
         first_frame_consumed = first_frame is None
         if first_frame is not None:
             frame = first_frame
+            try:
+                # garantir que a janela seja criada/visível antes do loop principal
+                cv2.imshow(nome_janela, frame)
+                cv2.waitKey(1)
+                try:
+                    # tentar colocar a janela em primeiro plano (se suportado)
+                    cv2.setWindowProperty(nome_janela, cv2.WND_PROP_TOPMOST, 1)
+                except Exception:
+                    pass
+            except Exception:
+                pass
 
         while True:
             if not first_frame_consumed:
@@ -112,7 +185,7 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
                 ok, frame = cap.read()
                 if not ok or frame is None:
                     falhas_leitura += 1
-                    if fonte_eh_camera and falhas_leitura < 30:
+                    if fonte_com_retry and falhas_leitura < 30:
                         continue
                     print("Fonte de video terminou ou ficou indisponivel.")
                     break
@@ -149,6 +222,29 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
                 ]
 
             atualizar_contagem(deteccoes, y_linha, estado_anterior, contagem)
+            # atualizar últimos vistos por id para poda futura
+            try:
+                ids_presentes = [int(tid) for (_x1, _y1, _x2, _y2, tid, _cid) in deteccoes]
+            except Exception:
+                ids_presentes = []
+            for tid in ids_presentes:
+                ultimo_visto[tid] = frame_idx
+            # poda periódica de ids antigos do estado_anterior
+            if frame_idx % N_FRAMES_PRUNE == 0 and frame_idx > 0:
+                lim = frame_idx - N_FRAMES_PRUNE
+                to_remove = [iid for iid, last in ultimo_visto.items() if last < lim]
+                for iid in to_remove:
+                    ultimo_visto.pop(iid, None)
+                    estado_anterior.pop(iid, None)
+            frame_idx += 1
+            # modo de depuração: sair após processar `max_frames` frames
+            if max_frames is not None:
+                try:
+                    if frame_idx >= int(max_frames):
+                        print(f"Debug: atingido max_frames={max_frames}, encerrando.")
+                        break
+                except Exception:
+                    pass
             demanda = manager.calcular_demanda(contagem)
             status, cor_status = manager.obter_status(demanda)
             controlador.propor(demanda)
@@ -167,6 +263,11 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
                         "latencia_ms": round(latencia_ms, 2),
                     })
                     registrar_metrica(log_path, evento)
+
+            # Se houver ciclo (Webster), limpar as contagens para que a
+            # demanda do próximo ciclo represente tráfego recente.
+            if eventos and any(ev.get("evento") == "ciclo" for ev in eventos):
+                contagem.clear()
 
             frame = desenhar_camera(frame, deteccoes, y_linha)
             dados = {
@@ -246,6 +347,7 @@ if __name__ == "__main__":
     parser.add_argument("--resize", type=int, default=None, help="Reduz maior dimensão (px)")
     parser.add_argument("--log-path", type=str, default="logs/metricas.jsonl", help="JSONL de métricas")
     parser.add_argument("--sem-log-metricas", action="store_true", help="Desliga o log")
+    parser.add_argument("--max-frames", type=int, default=None, help="(debug) processar apenas N frames e sair")
     args = parser.parse_args()
 
     if args.probe:
@@ -259,4 +361,5 @@ if __name__ == "__main__":
         resize=args.resize,
         log_metricas=not args.sem_log_metricas,
         log_path=args.log_path,
+        max_frames=args.max_frames,
     )

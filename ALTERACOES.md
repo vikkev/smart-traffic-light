@@ -44,6 +44,18 @@ O projeto foi separado em pastas (`src/`): visão, trânsito, tela, métricas. F
 ### Testes
 Foram adicionados testes automáticos do básico: cálculo do semáforo, contagem e o botão de esconder/mostrar o HUD.
 
+### Robustez de câmeras e RTSP
+- **Retry automático**: Para fontes de câmera local (int) e RTSP, até 30 tentativas automáticas de reconexão em caso de falha.
+- **Fallback de modelo**: Se `ultralytics` não estiver instalado, o sistema continua funcionando em modo reduzido (_DummyModel) para testes estruturais.
+- **Poda de track_ids**: IDs de rastreamento não vistos há 300+ frames são removidos automaticamente da memória, evitando vazamento.
+
+### Debug e validação
+- **--max-frames**: Argumento de debug que processa apenas N frames e encerra o programa. Útil para smoke tests rápidos com `--max-frames 120`.
+- **Reset de contagem ao ciclo**: Quando um ciclo completo de Webster termina, a contagem de veículos é zerada. Isso garante que a demanda do próximo ciclo reflita tráfego recente, não acumulado.
+
+### Novo teste
+- **test_demanda_reset_and_rtsp.py**: Valida que contagens são limpas ao final do ciclo e que a lógica `fonte_com_retry_for()` funciona corretamente para câmeras (int), RTSP e arquivos.
+
 ---
 
 ## O que isso NÃO é (importante)
