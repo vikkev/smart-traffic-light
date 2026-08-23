@@ -1,4 +1,4 @@
-# O que mudou nesta branch (explicação simples)
+# O que mudou nesta branch 
 
 Texto para quem não é da área de programação — grupo, orientador ou banca.
 
