@@ -44,6 +44,10 @@ G_MAX = 60.0
 DEMANDA_SATURACAO = 20.0
 FASES = ("VERDE_A", "AMARELO_A", "VERDE_B", "AMARELO_B")
 
+# Fonte de entrada do protótipo: webcam, rtsp ou video gravado.
+SOURCE_TYPE = "webcam"
+SOURCE_PATH = "0"
+
 FONTE_MIN_ESCALA = 0.45
 STATUS_PT = {
     "NORMAL": "Tranquilo",

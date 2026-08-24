@@ -11,11 +11,96 @@ import os
 import sys
 import time
 
-from src.config import FRACAO_Y_LINHA, IDS_CLASSES, LIMIAR_CONF
+from src.config import FRACAO_Y_LINHA, IDS_CLASSES, LIMIAR_CONF, SOURCE_PATH, SOURCE_TYPE
 from src.metricas import registrar_metrica
 from src.trafego import ControladorSemaforo, GerenciadorTrafego
 from src.ui.painel import alternar_painel, desenhar_camera, montar_frame
 from src.visao import atualizar_contagem, extrair_deteccoes
+
+
+def resolver_fonte(source=None, source_type=None, source_path=None):
+    """Resolve a fonte de entrada para webcam, RTSP ou vídeo gravado."""
+    if source is not None and str(source) != "None":
+        source_str = str(source).strip()
+        if isinstance(source, int):
+            return source, "webcam"
+        if source_str.isdigit():
+            return int(source_str), "webcam"
+        if source_str.lower().startswith("rtsp"):
+            return source_str, "rtsp"
+        return source_str, "video"
+
+    tipo = (source_type or SOURCE_TYPE or "webcam").lower()
+    if tipo == "webcam":
+        default = source_path if source_path is not None else SOURCE_PATH
+        if default is None or str(default) == "None":
+            return 0, "webcam"
+        default_str = str(default).strip()
+        if default_str.isdigit():
+            return int(default_str), "webcam"
+        return default_str, "video"
+    if tipo == "rtsp":
+        default = source_path if source_path is not None else SOURCE_PATH
+        return str(default or "rtsp://localhost/stream"), "rtsp"
+    if tipo == "video":
+        default = source_path if source_path is not None else SOURCE_PATH
+        return str(default or "video.mp4"), "video"
+
+    raise ValueError(f"Tipo de fonte inválido: {source_type!r}")
+
+
+def abrir_fonte(source=None, source_type=None, source_path=None):
+    """Abre a fonte usando um backend OpenCV simples e verifica a primeira leitura."""
+    source_to_open, resolved_type = resolver_fonte(source, source_type=source_type, source_path=source_path)
+    if isinstance(source_to_open, str) and source_to_open.isdigit():
+        source_to_open = int(source_to_open)
+        resolved_type = "webcam"
+
+    try:
+        import cv2
+    except Exception as e:
+        print(f"ERRO: falha ao importar OpenCV (cv2): {e}")
+        raise
+
+    try:
+        backends_to_try = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
+    except Exception:
+        backends_to_try = [cv2.CAP_ANY]
+
+    cap = None
+    backend_usado = None
+    for backend in backends_to_try:
+        candidate = None
+        try:
+            candidate = cv2.VideoCapture(source_to_open, backend)
+            if candidate is not None:
+                if candidate.isOpened():
+                    cap = candidate
+                    backend_usado = backend
+                    break
+                else:
+                    candidate.release()
+            else:
+                cap = None
+        except Exception:
+            cap = None
+
+    if cap is None:
+        try:
+            cap = cv2.VideoCapture(source_to_open)
+            backend_usado = "default"
+        except Exception:
+            return None
+
+    try:
+        ok_probe, _frame_probe = cap.read()
+        if not ok_probe:
+            print(f"AVISO: fonte aberta, mas não foi possível ler o primeiro frame em {source_to_open}.")
+    except Exception:
+        pass
+
+    print(f"Fonte aberta: {source_to_open} (tipo={resolved_type}, backend={backend_usado})")
+    return cap
 
 
 def fonte_com_retry_for(source_to_open):
@@ -25,7 +110,7 @@ def fonte_com_retry_for(source_to_open):
     )
 
 
-def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path="logs/metricas.jsonl", max_frames=None):
+def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path="logs/metricas.jsonl", max_frames=None, source_type=None, source_path=None):
     if not model_path:
         print("ERRO: O modelo (model) não foi especificado.")
         sys.exit(1)
@@ -79,39 +164,15 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
         raise
 
     try:
-        source_to_open = source
-        try:
-            if isinstance(source, str) and source.isdigit():
-                source_to_open = int(source)
-        except Exception:
-            source_to_open = source
+        source_to_open, resolved_type = resolver_fonte(source, source_type=source_type, source_path=source_path)
+        if isinstance(source_to_open, str) and source_to_open.isdigit():
+            source_to_open = int(source_to_open)
+            resolved_type = "webcam"
 
-        # ponytail: try/fallback de backends no Windows
-        try:
-            backends_to_try = [cv2.CAP_DSHOW, cv2.CAP_MSMF, cv2.CAP_ANY]
-        except Exception:
-            backends_to_try = [cv2.CAP_ANY]
-
-        cap = None
-        b = None
-        for b in backends_to_try:
-            try:
-                cap = cv2.VideoCapture(source_to_open, b)
-                if cap is not None and cap.isOpened():
-                    break
-                if cap is not None:
-                    try:
-                        cap.release()
-                    except Exception:
-                        pass
-                cap = None
-            except Exception:
-                cap = None
-
+        cap = abrir_fonte(source_to_open, source_type=resolved_type, source_path=source_path)
         if cap is None or not cap.isOpened():
-            print(f"ERRO: Não foi possível abrir a fonte: {source}")
+            print(f"ERRO: Não foi possível abrir a fonte: {source_to_open}")
             sys.exit(1)
-        print(f"Fonte aberta: {source_to_open} com backend={b}")
 
         altura = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
         first_frame = None
@@ -341,6 +402,8 @@ def _rodar_probe():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--source", type=str, default="0", help="Fonte (câmera, arquivo ou RTSP)")
+    parser.add_argument("--source-type", type=str, default=None, choices=["webcam", "rtsp", "video"], help="Tipo de fonte: webcam, rtsp ou video")
+    parser.add_argument("--source-path", type=str, default=None, help="Caminho da fonte para streams RTSP/vídeo")
     parser.add_argument("--model", type=str, default="yolov8s.pt", help="Caminho para o modelo .pt")
     parser.add_argument("--conf", type=float, default=None, help="Limiar de confiança")
     parser.add_argument("--probe", action="store_true", help="Probe de câmeras")
@@ -362,4 +425,6 @@ if __name__ == "__main__":
         log_metricas=not args.sem_log_metricas,
         log_path=args.log_path,
         max_frames=args.max_frames,
+        source_type=args.source_type,
+        source_path=args.source_path,
     )
