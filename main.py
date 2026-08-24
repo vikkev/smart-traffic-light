@@ -73,15 +73,15 @@ def abrir_fonte(source=None, source_type=None, source_path=None):
         candidate = None
         try:
             candidate = cv2.VideoCapture(source_to_open, backend)
+            if candidate is not None and candidate.isOpened():
+                cap = candidate
+                backend_usado = backend
+                break
             if candidate is not None:
-                if candidate.isOpened():
-                    cap = candidate
-                    backend_usado = backend
-                    break
-                else:
+                try:
                     candidate.release()
-            else:
-                cap = None
+                except Exception:
+                    pass
         except Exception:
             cap = None
 
@@ -96,6 +96,8 @@ def abrir_fonte(source=None, source_type=None, source_path=None):
         ok_probe, _frame_probe = cap.read()
         if not ok_probe:
             print(f"AVISO: fonte aberta, mas não foi possível ler o primeiro frame em {source_to_open}.")
+        elif resolved_type == "video":
+            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     except Exception:
         pass
 
