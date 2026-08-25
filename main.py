@@ -78,12 +78,10 @@ def abrir_fonte(source=None, source_type=None, source_path=None):
                 backend_usado = backend
                 break
             if candidate is not None:
-                try:
-                    candidate.release()
-                except Exception:
-                    pass
+                candidate.release()
         except Exception:
-            cap = None
+            pass
+
 
     if cap is None:
         try:
@@ -93,11 +91,22 @@ def abrir_fonte(source=None, source_type=None, source_path=None):
             return None
 
     try:
+        # only attempt to rewind for video files after confirming the capture is opened
+        try:
+            _is_opened = cap.isOpened()
+        except Exception:
+            _is_opened = False
+
+        if _is_opened and resolved_type == "video":
+            try:
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+            except Exception:
+                # ignore failures to set position; read() remains the practical validation
+                pass
+
         ok_probe, _frame_probe = cap.read()
         if not ok_probe:
             print(f"AVISO: fonte aberta, mas não foi possível ler o primeiro frame em {source_to_open}.")
-        elif resolved_type == "video":
-            cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
     except Exception:
         pass
 
@@ -112,7 +121,24 @@ def fonte_com_retry_for(source_to_open):
     )
 
 
-def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path="logs/metricas.jsonl", max_frames=None, source_type=None, source_path=None):
+def detectar_dispositivo(forcar_cpu=False):
+    if forcar_cpu:
+        return "cpu"
+    try:
+        import torch
+        if torch.cuda.is_available():
+            print(f"GPU CUDA: {torch.cuda.get_device_name(0)}")
+            return 0
+        if getattr(torch.backends, "mps", None) and torch.backends.mps.is_available():
+            print("GPU MPS detectada")
+            return "mps"
+    except ImportError:
+        pass
+    print("Usando CPU")
+    return "cpu"
+
+
+def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path="logs/metricas.jsonl", max_frames=None, source_type=None, source_path=None, forcar_cpu=False):
     if not model_path:
         print("ERRO: O modelo (model) não foi especificado.")
         sys.exit(1)
@@ -152,6 +178,7 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
             print("AVISO: biblioteca 'ultralytics' não encontrada. O pipeline continuará em modo reduzido (sem detecções).")
 
         if ULTRALYTICS_AVAILABLE:
+            dispositivo = detectar_dispositivo(forcar_cpu)
             try:
                 model = YOLO(model_path)
             except FileNotFoundError:
@@ -160,8 +187,10 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
             except Exception as e:
                 print(f"ERRO: falha ao carregar o modelo '{model_path}': {e}")
                 raise
+            print(f"Device: {dispositivo}")
         else:
             model = _DummyModel()
+            dispositivo = "cpu"
     except Exception:
         raise
 
@@ -271,7 +300,7 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
             t0 = time.perf_counter()
             try:
                 results = model.track(
-                    proc_frame, persist=True, classes=IDS_CLASSES, conf=conf_val, verbose=False
+                    proc_frame, persist=True, classes=IDS_CLASSES, conf=conf_val, verbose=False, device=dispositivo
                 )[0]
                 deteccoes = extrair_deteccoes(results)
             except Exception as e:
@@ -407,6 +436,7 @@ if __name__ == "__main__":
     parser.add_argument("--source-type", type=str, default=None, choices=["webcam", "rtsp", "video"], help="Tipo de fonte: webcam, rtsp ou video")
     parser.add_argument("--source-path", type=str, default=None, help="Caminho da fonte para streams RTSP/vídeo")
     parser.add_argument("--model", type=str, default="yolov8s.pt", help="Caminho para o modelo .pt")
+    parser.add_argument("--force-cpu", action="store_true", help="Força uso de CPU mesmo se GPU disponível")
     parser.add_argument("--conf", type=float, default=None, help="Limiar de confiança")
     parser.add_argument("--probe", action="store_true", help="Probe de câmeras")
     parser.add_argument("--resize", type=int, default=None, help="Reduz maior dimensão (px)")
@@ -429,4 +459,5 @@ if __name__ == "__main__":
         max_frames=args.max_frames,
         source_type=args.source_type,
         source_path=args.source_path,
+        forcar_cpu=args.force_cpu,
     )
