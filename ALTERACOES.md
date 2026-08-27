@@ -44,11 +44,22 @@ O projeto foi separado em pastas (`src/`): visão, trânsito, tela, métricas. F
 ### Testes
 Foram adicionados testes automáticos do básico: cálculo do semáforo, contagem e o botão de esconder/mostrar o HUD.
 
+### Modos câmera e demo
+- **`--mode camera`**: webcam (padrão).
+- **`--mode demo`**: abre `samples/semaforo.mp4` e **reinicia o vídeo em loop** no fim (contagem e semáforo simulado continuam).
+- Ainda dá para passar `--source caminho.mp4` manualmente.
+
+### Linha de contagem adaptável (zero-config)
+- No demo (`semaforo.mp4`) usa **preset** calibrado na faixa (mais estável); na câmera tenta **auto**.
+- **A** = forçar auto · **L** = 2 cliques · **D** / `--debug-linha` = ver Hough/cluster.
+- Auto rejeita linha quase vertical (pouca largura) — evita o “traço torto” no lado direito.
+- Classes estáveis por `track_id` (voto): moto não vira “carro” no frame do cruzamento; person larga → moto.
+- Piloto: filtro por contenção da bbox da pessoa dentro da moto.
+
 ### Robustez de câmeras e RTSP
 - **Retry automático**: Para fontes de câmera local (int) e RTSP, até 30 tentativas automáticas de reconexão em caso de falha.
 - **Fallback de modelo**: Se `ultralytics` não estiver instalado, o sistema continua funcionando em modo reduzido (_DummyModel) para testes estruturais.
 - **Poda de track_ids**: IDs de rastreamento não vistos há 300+ frames são removidos automaticamente da memória, evitando vazamento.
-
 ### Debug e validação
 - **--max-frames**: Argumento de debug que processa apenas N frames e encerra o programa. Útil para smoke tests rápidos com `--max-frames 120`.
 - **Reset de contagem ao ciclo**: Quando um ciclo completo de Webster termina, a contagem de veículos é zerada. Isso garante que a demanda do próximo ciclo reflita tráfego recente, não acumulado.
@@ -74,14 +85,19 @@ O que entregamos é um **protótipo que demonstra** detecção + contagem + deci
 ## Como usar (bem resumido)
 
 ```text
-python main.py --source 0
+python main.py --mode camera
+python main.py --mode demo --resize 640
+python main.py --mode demo --debug-linha
 ```
 
+- **camera** — webcam ao vivo  
+- **demo** — vídeo `samples/semaforo.mp4` em loop  
+- **A** — auto-calibrar linha de novo  
+- **L** — calibrar linha com 2 cliques  
+- **D** — debug da linha (mostra o que o algoritmo viu)  
 - **I** — mostrar/esconder as infos na câmera  
 - **Q** — sair  
-- Se estiver lento: `python main.py --source 0 --resize 640`
-
----
+- Se estiver lento: acrescente `--resize 640`---
 
 ## Resumo para a banca
 

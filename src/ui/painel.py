@@ -76,12 +76,80 @@ def _texto_passaram(contagem):
     return " · ".join(partes)
 
 
-def desenhar_camera(frame, deteccoes, y_linha):
+def desenhar_debug_linha(frame, debug_info):
+    """Overlay: Hough bruto, cluster, picos e linha (defesa TCC)."""
+    import cv2
+
+    if not debug_info:
+        return frame
+    aa = cv2.LINE_AA
+    for x1, y1, x2, y2 in debug_info.get("hough") or []:
+        cv2.line(frame, (int(x1), int(y1)), (int(x2), int(y2)), (80, 80, 80), 1, aa)
+    for x1, y1, x2, y2 in debug_info.get("cluster") or []:
+        cv2.line(frame, (int(x1), int(y1)), (int(x2), int(y2)), (255, 128, 0), 2, aa)
+    u = debug_info.get("u")
+    seg = debug_info.get("segmento_px")
+    if u is not None and seg is not None:
+        (sx, sy), _ = seg
+        # picos: posições ao longo da normal; marcar perto do centro do segmento
+        for i, _p in enumerate(debug_info.get("picos") or []):
+            cv2.circle(frame, (int(sx) + i * 3, int(sy)), 4, (255, 0, 255), -1, aa)
+    return frame
+
+
+def desenhar_camera(
+    frame,
+    deteccoes,
+    linha_px,
+    debug_info=None,
+    mostrar_debug=False,
+    calibrando=False,
+    calib_pontos=None,
+    mouse_pos=None,
+):
     import cv2
 
     aa = cv2.LINE_AA
-    h, w = frame.shape[:2]
-    cv2.line(frame, (0, int(y_linha)), (w, int(y_linha)), (0, 255, 255), 2, aa)
+    if mostrar_debug and debug_info:
+        desenhar_debug_linha(frame, debug_info)
+
+    if linha_px is not None:
+        if isinstance(linha_px, (int, float)):
+            h, w = frame.shape[:2]
+            cv2.line(frame, (0, int(linha_px)), (w, int(linha_px)), (0, 255, 255), 2, aa)
+        else:
+            p1, p2 = linha_px
+            cv2.line(
+                frame,
+                (int(p1[0]), int(p1[1])),
+                (int(p2[0]), int(p2[1])),
+                (0, 255, 255),
+                2,
+                aa,
+            )
+
+    if calibrando:
+        pts = list(calib_pontos or [])
+        for p in pts:
+            cv2.circle(frame, (int(p[0]), int(p[1])), 6, (0, 200, 255), -1, aa)
+        if len(pts) == 1 and mouse_pos is not None:
+            cv2.line(
+                frame,
+                (int(pts[0][0]), int(pts[0][1])),
+                (int(mouse_pos[0]), int(mouse_pos[1])),
+                (0, 200, 255),
+                1,
+                aa,
+            )
+        _texto_contorno(
+            frame,
+            "Calibrar: clique 2 pontos (Esc cancela)",
+            (12, frame.shape[0] - 28),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.55,
+            (0, 200, 255),
+            2,
+        )
 
     for x1, y1, x2, y2, _tid, cls_id in deteccoes:
         nome = NOMES_PT.get(ID_PARA_NOME.get(cls_id, ""), str(cls_id))
@@ -98,7 +166,7 @@ def montar_frame(frame_camera, dados_resumo, painel_visivel):
     fonte = cv2.FONT_HERSHEY_SIMPLEX
 
     if not painel_visivel:
-        _texto_contorno(frame_camera, "I = HUD   Q = sair", (10, h - 12), fonte, 0.5, (200, 200, 200), 1)
+        _texto_contorno(frame_camera, "I=HUD  A=auto  L=linha  D=debug  Q=sair", (10, h - 12), fonte, 0.45, (200, 200, 200), 1)
         return frame_camera
 
     nome, cor_sinal = _cor_fase(dados_resumo["fase"])
@@ -114,4 +182,7 @@ def montar_frame(frame_camera, dados_resumo, painel_visivel):
     _texto_contorno(frame_camera, f"{nome}  {restam}s", (x + 24, y), fonte, 0.75, cor_sinal, 2)
     _texto_contorno(frame_camera, f"Fluxo: {fluxo}", (x, y + 32), fonte, 0.6, dados_resumo["cor_status"], 2)
     desenhar_texto_ajustado(frame_camera, contagem, (x, y + 60), fonte, 0.55, (0, 255, 255), 2, max(80, w - 24))
+    origem = dados_resumo.get("origem_linha")
+    if origem:
+        _texto_contorno(frame_camera, f"Linha: {origem}", (x, y + 88), fonte, 0.45, (180, 180, 180), 1)
     return frame_camera

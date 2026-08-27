@@ -2,8 +2,10 @@
 Protótipo TCC: YOLOv8 + contagem + Webster simulado (Univ. Marília).
 
 Uso:
+    python main.py --mode camera
+    python main.py --mode demo --resize 640
     python main.py --source 0 --model yolov8s.pt
-Teclas: I = painel | Q/Esc = sair | F = tela cheia
+Teclas: I = HUD | A = auto linha | L = calibrar | D = debug | Q/Esc = sair | F = tela cheia
 """
 
 import argparse
@@ -11,11 +13,55 @@ import os
 import sys
 import time
 
-from src.config import FRACAO_Y_LINHA, IDS_CLASSES, LIMIAR_CONF, SOURCE_PATH, SOURCE_TYPE
+from src.config import IDS_CLASSES, LIMIAR_CONF, SOURCE_PATH, SOURCE_TYPE, VIDEO_DEMO_PADRAO
 from src.metricas import registrar_metrica
 from src.trafego import ControladorSemaforo, GerenciadorTrafego
 from src.ui.painel import alternar_painel, desenhar_camera, montar_frame
-from src.visao import atualizar_contagem, extrair_deteccoes
+from src.visao import (
+    atualizar_contagem,
+    estabilizar_deteccoes,
+    extrair_deteccoes,
+    filtrar_pessoas_em_motos,
+    resolver_linha,
+    segmento_px_para_norm,
+)
+
+def aplicar_modo(mode, source):
+    """Aplica preset camera|demo. Retorna o source efetivo (string ou int-like).
+
+    Em --mode demo, se --source for omitido ou \"0\", usa VIDEO_DEMO_PADRAO.
+    Qualquer outro --source sobrescreve o preset.
+    """
+    modo = (mode or "camera").lower().strip()
+    if modo not in ("camera", "demo"):
+        raise ValueError(f"Modo inválido: {mode!r}")
+
+    if source is None or str(source) == "None":
+        source_str = "0"
+    else:
+        source_str = str(source).strip()
+
+    if modo == "demo" and (source_str == "" or source_str == "0"):
+        return VIDEO_DEMO_PADRAO
+    return source_str
+
+
+def validar_arquivo_video(caminho):
+    """Garante que o arquivo de vídeo existe; encerra com mensagem clara se não."""
+    if not caminho or not os.path.isfile(str(caminho)):
+        print(f"ERRO: vídeo não encontrado: {caminho}")
+        print(f"Coloque o arquivo em '{VIDEO_DEMO_PADRAO}' ou passe --source com outro caminho.")
+        sys.exit(1)
+
+
+def reiniciar_video_se_eof(cap):
+    """Rebobina captura de arquivo para o frame 0. Retorna True se o set foi aceito."""
+    try:
+        import cv2
+
+        return bool(cap.set(cv2.CAP_PROP_POS_FRAMES, 0))
+    except Exception:
+        return False
 
 
 def resolver_fonte(source=None, source_type=None, source_path=None):
@@ -138,7 +184,7 @@ def detectar_dispositivo(forcar_cpu=False):
     return "cpu"
 
 
-def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path="logs/metricas.jsonl", max_frames=None, source_type=None, source_path=None, forcar_cpu=False):
+def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path="logs/metricas.jsonl", max_frames=None, source_type=None, source_path=None, forcar_cpu=False, mode="camera", debug_linha=False):
     if not model_path:
         print("ERRO: O modelo (model) não foi especificado.")
         sys.exit(1)
@@ -148,6 +194,12 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
     )
     if looks_like_file and not os.path.exists(model_path):
         print(f"ERRO: O modelo '{model_path}' não foi encontrado no caminho especificado.")
+        sys.exit(1)
+
+    try:
+        source = aplicar_modo(mode, source)
+    except ValueError as e:
+        print(f"ERRO: {e}")
         sys.exit(1)
 
     if not source or str(source) == "None":
@@ -200,6 +252,9 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
             source_to_open = int(source_to_open)
             resolved_type = "webcam"
 
+        if resolved_type == "video":
+            validar_arquivo_video(source_to_open)
+
         cap = abrir_fonte(source_to_open, source_type=resolved_type, source_path=source_path)
         if cap is None or not cap.isOpened():
             print(f"ERRO: Não foi possível abrir a fonte: {source_to_open}")
@@ -215,10 +270,10 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
             else:
                 altura = 480
 
-        y_linha = int(altura * FRACAO_Y_LINHA)
         manager = GerenciadorTrafego()
         controlador = ControladorSemaforo()
         estado_anterior, contagem = {}, {}
+        historico_classes = {}
         ultimo_tick = time.monotonic()
         # Para poda de track_ids que não aparecem faz tempo
         ultimo_visto = {}
@@ -231,12 +286,53 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
             isinstance(source_to_open, str) and source_to_open.lower().startswith("rtsp")
         )
         falhas_leitura = 0
+        avisou_loop = False
         nome_janela = "Monitoramento Inteligente - TCC"
 
-        print(f"Iniciando sistema com Source: {source} e Model: {model_path}")
-        print("Teclas: I = HUD | Q = sair | F = tela cheia")
+        linha_px = None
+        origem_linha = None
+        debug_info = {}
+        override_norm = None
+        mostrar_debug = bool(debug_linha)
+        calibrando = False
+        calib_pontos = []
+        mouse_pos = [0, 0]
+        linha_inicializada = False
+
+        def _refinar_linha(frame_ref, forcar_auto=False):
+            nonlocal linha_px, origem_linha, debug_info, override_norm, estado_anterior, historico_classes
+            ov = None if forcar_auto else override_norm
+            if forcar_auto:
+                override_norm = None
+            linha_px, origem_linha, debug_info = resolver_linha(
+                source, frame_ref, override_norm=ov, forcar_auto=forcar_auto
+            )
+            estado_anterior.clear()
+            historico_classes.clear()
+            print(f"Linha de contagem: origem={origem_linha}")
+
+        print(f"Iniciando sistema com mode={mode}, Source: {source} e Model: {model_path}")
+        if resolved_type == "video":
+            print("Vídeo em loop: ao terminar, reinicia do início (contagem/Webster seguem).")
+        print("Teclas: I=HUD | A=auto linha | L=calibrar | D=debug | Q=sair | F=tela cheia")
 
         cv2.namedWindow(nome_janela, cv2.WINDOW_NORMAL)
+
+        def _on_mouse(event, x, y, flags, param):
+            nonlocal calibrando, calib_pontos, override_norm, linha_px, origem_linha, estado_anterior
+            mouse_pos[0], mouse_pos[1] = x, y
+            if not calibrando:
+                return
+            if event == cv2.EVENT_LBUTTONDOWN:
+                calib_pontos.append((x, y))
+                if len(calib_pontos) >= 2:
+                    h0, w0 = param["shape"][:2] if param.get("shape") else (y + 1, x + 1)
+                    # shape atualizado no loop
+                    pass
+
+        mouse_state = {"shape": (altura, 640)}
+        cv2.setMouseCallback(nome_janela, _on_mouse, mouse_state)
+
         fullscreen = False
         try:
             import numpy as _np
@@ -279,9 +375,44 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
                     falhas_leitura += 1
                     if fonte_com_retry and falhas_leitura < 30:
                         continue
-                    print("Fonte de video terminou ou ficou indisponivel.")
-                    break
-                falhas_leitura = 0
+                    if resolved_type == "video":
+                        if not avisou_loop:
+                            print("Fim do vídeo: reiniciando em loop.")
+                            avisou_loop = True
+                        if reiniciar_video_se_eof(cap):
+                            ok, frame = cap.read()
+                            if ok and frame is not None:
+                                falhas_leitura = 0
+                            else:
+                                print("Fonte de video terminou ou ficou indisponivel.")
+                                break
+                        else:
+                            print("Fonte de video terminou ou ficou indisponivel.")
+                            break
+                    else:
+                        print("Fonte de video terminou ou ficou indisponivel.")
+                        break
+                else:
+                    falhas_leitura = 0
+
+            mouse_state["shape"] = frame.shape
+
+            if not linha_inicializada:
+                _refinar_linha(frame)
+                linha_inicializada = True
+
+            # Finaliza calibração manual com 2º clique
+            if calibrando and len(calib_pontos) >= 2:
+                h0, w0 = frame.shape[:2]
+                p1, p2 = calib_pontos[0], calib_pontos[1]
+                override_norm = segmento_px_para_norm((p1, p2), w0, h0)
+                linha_px = (p1, p2)
+                origem_linha = "override"
+                estado_anterior.clear()
+                historico_classes.clear()
+                calibrando = False
+                calib_pontos = []
+                print("Linha de contagem: origem=override (manual)")
 
             conf_val = LIMIAR_CONF if conf is None else float(conf)
             scale = 1.0
@@ -313,7 +444,10 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
                     for (x1, y1, x2, y2, tid, cid) in deteccoes
                 ]
 
-            atualizar_contagem(deteccoes, y_linha, estado_anterior, contagem)
+            deteccoes = estabilizar_deteccoes(deteccoes, historico_classes)
+            deteccoes = filtrar_pessoas_em_motos(deteccoes)
+            if linha_px is not None:
+                atualizar_contagem(deteccoes, linha_px, estado_anterior, contagem)
             # atualizar últimos vistos por id para poda futura
             try:
                 ids_presentes = [int(tid) for (_x1, _y1, _x2, _y2, tid, _cid) in deteccoes]
@@ -328,6 +462,7 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
                 for iid in to_remove:
                     ultimo_visto.pop(iid, None)
                     estado_anterior.pop(iid, None)
+                    historico_classes.pop(iid, None)
             frame_idx += 1
             # modo de depuração: sair após processar `max_frames` frames
             if max_frames is not None:
@@ -361,27 +496,51 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
             if eventos and any(ev.get("evento") == "ciclo" for ev in eventos):
                 contagem.clear()
 
-            frame = desenhar_camera(frame, deteccoes, y_linha)
+            frame = desenhar_camera(
+                frame,
+                deteccoes,
+                linha_px,
+                debug_info=debug_info,
+                mostrar_debug=mostrar_debug,
+                calibrando=calibrando,
+                calib_pontos=calib_pontos,
+                mouse_pos=mouse_pos,
+            )
             dados = {
                 "fase": controlador.fase,
                 "tempo_restante": controlador.tempo_restante,
                 "status": status,
                 "cor_status": cor_status,
                 "contagem": contagem,
+                "origem_linha": origem_linha,
             }
             saida = montar_frame(frame, dados, painel_visivel)
             cv2.imshow(nome_janela, saida)
 
             key = cv2.waitKeyEx(1)
+            if key == 27 and calibrando:
+                calibrando = False
+                calib_pontos = []
+                print("Calibracao cancelada.")
+                continue
             if key in (ord("q"), ord("Q"), 27):
                 break
             if key in (ord("i"), ord("I")):
                 painel_visivel = alternar_painel(painel_visivel)
+            if key in (ord("a"), ord("A")):
+                _refinar_linha(frame, forcar_auto=True)
+            if key in (ord("l"), ord("L")):
+                calibrando = True
+                calib_pontos = []
+                print("Calibracao: clique dois pontos na faixa.")
+            if key in (ord("d"), ord("D")):
+                mostrar_debug = not mostrar_debug
+                print(f"Debug linha: {'ligado' if mostrar_debug else 'desligado'}")
             if key in (ord("f"), ord("F"), 63276, 65470):
                 fullscreen = not fullscreen
                 try:
-                    modo = cv2.WINDOW_FULLSCREEN if fullscreen else cv2.WINDOW_NORMAL
-                    cv2.setWindowProperty(nome_janela, cv2.WND_PROP_FULLSCREEN, modo)
+                    modo_fs = cv2.WINDOW_FULLSCREEN if fullscreen else cv2.WINDOW_NORMAL
+                    cv2.setWindowProperty(nome_janela, cv2.WND_PROP_FULLSCREEN, modo_fs)
                 except Exception:
                     pass
     finally:
@@ -432,7 +591,14 @@ def _rodar_probe():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--source", type=str, default="0", help="Fonte (câmera, arquivo ou RTSP)")
+    parser.add_argument(
+        "--mode",
+        type=str,
+        default="camera",
+        choices=["camera", "demo"],
+        help="Preset: camera (webcam) ou demo (samples/semaforo.mp4 em loop)",
+    )
+    parser.add_argument("--source", type=str, default="0", help="Fonte (câmera, arquivo ou RTSP); sobrescreve o preset se ≠ 0")
     parser.add_argument("--source-type", type=str, default=None, choices=["webcam", "rtsp", "video"], help="Tipo de fonte: webcam, rtsp ou video")
     parser.add_argument("--source-path", type=str, default=None, help="Caminho da fonte para streams RTSP/vídeo")
     parser.add_argument("--model", type=str, default="yolov8s.pt", help="Caminho para o modelo .pt")
@@ -443,6 +609,11 @@ if __name__ == "__main__":
     parser.add_argument("--log-path", type=str, default="logs/metricas.jsonl", help="JSONL de métricas")
     parser.add_argument("--sem-log-metricas", action="store_true", help="Desliga o log")
     parser.add_argument("--max-frames", type=int, default=None, help="(debug) processar apenas N frames e sair")
+    parser.add_argument(
+        "--debug-linha",
+        action="store_true",
+        help="Mostra overlay de debug da auto-calibração (Hough/cluster/linha)",
+    )
     args = parser.parse_args()
 
     if args.probe:
@@ -460,4 +631,6 @@ if __name__ == "__main__":
         source_type=args.source_type,
         source_path=args.source_path,
         forcar_cpu=args.force_cpu,
+        mode=args.mode,
+        debug_linha=args.debug_linha,
     )
