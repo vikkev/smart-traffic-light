@@ -126,6 +126,18 @@ pip install ultralytics
 
 ## Como usar
 
+### Modos rápidos (recomendado)
+
+```bash
+# Câmera ao vivo (padrão)
+python main.py --mode camera
+
+# Vídeo demo em loop (samples/semaforo.mp4) — teste/ilustração
+python main.py --mode demo --resize 640
+```
+
+`--source` sobrescreve o preset quando diferente de `0` (ex.: outro arquivo ou índice de câmera).
+
 ### Webcam local
 
 ```bash
@@ -135,8 +147,24 @@ python main.py --source 0
 ### Vídeo gravado
 
 ```bash
+python main.py --source samples/semaforo.mp4
+# ou qualquer arquivo:
 python main.py --source caminho/para/video.mp4
 ```
+
+Arquivos de vídeo reiniciam do início ao terminar (loop), sem zerar contagem/Webster.
+
+### Linha de contagem (auto)
+
+No primeiro frame o sistema tenta detectar a **faixa de pedestres** e posiciona a linha amarela **perpendicular** às listras (corta o fluxo). Sem configuração.
+
+| Tecla / flag | Ação |
+|---|---|
+| **A** | Nova auto-calibração |
+| **L** | Calibração manual (2 cliques); Esc cancela |
+| **D** / `--debug-linha` | Overlay: segmentos Hough, cluster e linha final |
+
+Se a auto falhar: preset do demo (`samples/semaforo.mp4`) ou linha horizontal de reserva. Piloto em moto não é contado como pedestre (contenção bbox).
 
 ### Stream RTSP
 
@@ -184,7 +212,8 @@ python main.py --source 0 --max-frames 50
 
 | Opção | Padrão | Descrição |
 |---|---|---|
-| `--source` | `0` | ID da câmera, caminho de vídeo ou URL RTSP |
+| `--mode` | `camera` | Preset: `camera` (webcam) ou `demo` (`samples/semaforo.mp4` em loop) |
+| `--source` | `0` | ID da câmera, caminho de vídeo ou URL RTSP (sobrescreve o preset se ≠ `0`) |
 | `--source-type` | `None` | Tipo da fonte: `webcam`, `rtsp` ou `video` |
 | `--source-path` | `None` | Caminho ou endpoint da fonte |
 | `--model` | `yolov8s.pt` | Modelo YOLOv8 |
@@ -194,6 +223,8 @@ python main.py --source 0 --max-frames 50
 | `--log-path` | `logs/metricas.jsonl` | Caminho do arquivo de métricas |
 | `--sem-log-metricas` | `False` | Desabilita a gravação de métricas |
 | `--max-frames` | `None` | Processa apenas N frames em modo debug |
+| `--debug-linha` | `False` | Overlay de debug da auto-calibração da linha |
+| `--force-cpu` | `False` | Força CPU mesmo com GPU disponível |
 
 ---
 
