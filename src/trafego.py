@@ -21,6 +21,13 @@ class GerenciadorTrafego:
                 pontuacao += quantidade * DADOS_VEICULOS[nome]["peso"]
         return pontuacao
 
+    def taxa_por_minuto(self, pontuacao, duracao_s):
+        """Equivalentes por minuto. Contagem acumulada não é volume de Webster."""
+        duracao_s = float(duracao_s)
+        if duracao_s <= 0.0:
+            return 0.0
+        return float(pontuacao) * 60.0 / duracao_s
+
     def obter_status(self, pontuacao):
         if pontuacao > 15:
             return "PRIORIDADE", (0, 0, 255)
@@ -29,8 +36,32 @@ class GerenciadorTrafego:
         return "NORMAL", (0, 255, 0)
 
 
+def _y_por_taxa(taxa):
+    return max(Y_A_MIN, min(Y_A_MAX, float(taxa) / DEMANDA_SATURACAO))
+
+
+def _limitar_proporcional(verde_a, verde_b):
+    """Encolhe os dois verdes juntos quando algum passa de G_MAX.
+
+    Limitar cada verde sozinho jogava o resto no outro. Com demanda >= 14
+    os dois batiam em 60 s e o eixo mais cheio perdia a prioridade.
+    """
+    maior = max(verde_a, verde_b, 1e-9)
+    if maior > G_MAX:
+        escala = G_MAX / maior
+        verde_a *= escala
+        verde_b *= escala
+    verde_a = min(G_MAX, max(G_MIN, verde_a))
+    verde_b = min(G_MAX, max(G_MIN, verde_b))
+    return verde_a, verde_b
+
+
 class ControladorSemaforo:
-    """Tempos de fase por Webster. Recalcula só no próximo ciclo."""
+    """Tempos de fase por Webster. Recalcula só no próximo ciclo.
+
+    A demanda é taxa (equivalentes por minuto), na mesma unidade de
+    DEMANDA_SATURACAO. Sem taxa do eixo B, usa o Y_B fixo da câmera única.
+    """
 
     def __init__(self):
         self.fase = "VERDE_A"
@@ -42,18 +73,28 @@ class ControladorSemaforo:
         self.proximo_ciclo = None
         self.iniciar(0.0)
 
-    def calcular_tempos(self, demanda):
-        y_a = max(Y_A_MIN, min(Y_A_MAX, float(demanda) / DEMANDA_SATURACAO))
-        y_soma = y_a + Y_B
+    def calcular_tempos(self, demanda, taxa_b=None):
+        y_a = _y_por_taxa(demanda)
+        y_b = Y_B if taxa_b is None else _y_por_taxa(taxa_b)
+        y_soma = y_a + y_b
         sobrecarregado = y_soma > Y_MAX
-        Y = min(y_soma, Y_MAX)
+        if sobrecarregado and y_soma > 0.0:
+            fator = Y_MAX / y_soma
+            y_a *= fator
+            y_b *= fator
+        Y = min(y_a + y_b, Y_MAX)
         ciclo_webster = (1.5 * TEMPO_PERDIDO + 5.0) / (1.0 - Y)
-        verde_disponivel = ciclo_webster - TEMPO_PERDIDO
-        verde_a = max(G_MIN, min(G_MAX, (y_a / Y) * verde_disponivel))
-        verde_b = max(G_MIN, min(G_MAX, verde_disponivel - verde_a))
+        verde_disponivel = max(0.0, ciclo_webster - TEMPO_PERDIDO)
+        if Y <= 1e-9:
+            bruto_a = bruto_b = verde_disponivel / 2.0
+        else:
+            bruto_a = (y_a / Y) * verde_disponivel
+            bruto_b = (y_b / Y) * verde_disponivel
+        verde_a, verde_b = _limitar_proporcional(bruto_a, bruto_b)
         ciclo = verde_a + verde_b + 2 * TEMPO_AMARELO
         return {
             "y_a": y_a,
+            "y_b": y_b,
             "Y": Y,
             "verde_a": verde_a,
             "verde_b": verde_b,

@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<tlLogics>
+    <tlLogic id="C" type="static" programID="0" offset="0">
+        <phase duration="30" state="GGrrGGrr"/>
+        <phase duration="3" state="yyrryyrr"/>
+        <phase duration="1" state="rrrrrrrr"/>
+        <phase duration="30" state="rrGGrrGG"/>
+        <phase duration="3" state="rryyrryy"/>
+        <phase duration="1" state="rrrrrrrr"/>
+    </tlLogic>
+</tlLogics>
