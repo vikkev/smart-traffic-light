@@ -184,7 +184,7 @@ def detectar_dispositivo(forcar_cpu=False):
     return "cpu"
 
 
-def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path="logs/metricas.jsonl", max_frames=None, source_type=None, source_path=None, forcar_cpu=False, mode="camera", debug_linha=False):
+def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path="logs/metricas.jsonl", max_frames=None, source_type=None, source_path=None, forcar_cpu=False, mode="camera", debug_linha=False, exportar_demanda=None):
     if not model_path:
         print("ERRO: O modelo (model) não foi especificado.")
         sys.exit(1)
@@ -275,6 +275,8 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
         estado_anterior, contagem = {}, {}
         historico_classes = {}
         ultimo_tick = time.monotonic()
+        inicio_sessao = ultimo_tick
+        inicio_janela = ultimo_tick
         # Para poda de track_ids que não aparecem faz tempo
         ultimo_visto = {}
         frame_idx = 0
@@ -472,10 +474,12 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
                         break
                 except Exception:
                     pass
-            demanda = manager.calcular_demanda(contagem)
-            status, cor_status = manager.obter_status(demanda)
-            controlador.propor(demanda)
+            pontuacao = manager.calcular_demanda(contagem)
             agora = time.monotonic()
+            # Webster usa taxa (equiv./min) na janela do ciclo, não o acumulado.
+            demanda = manager.taxa_por_minuto(pontuacao, agora - inicio_janela)
+            status, cor_status = manager.obter_status(pontuacao)
+            controlador.propor(demanda)
             eventos = controlador.tick(agora - ultimo_tick)
             ultimo_tick = agora
             latencia_ms = (time.perf_counter() - t0) * 1000.0
@@ -485,16 +489,27 @@ def main(source, model_path, conf=None, resize=None, log_metricas=True, log_path
                     evento.update({
                         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
                         "demanda": round(demanda, 2),
+                        "pontuacao": round(pontuacao, 2),
+                        "janela_s": round(max(agora - inicio_janela, 0.0), 2),
                         "status": status,
                         "contagens": dict(contagem),
                         "latencia_ms": round(latencia_ms, 2),
                     })
                     registrar_metrica(log_path, evento)
 
-            # Se houver ciclo (Webster), limpar as contagens para que a
-            # demanda do próximo ciclo represente tráfego recente.
+            # Ciclo fechado: a janela seguinte começa do zero (tráfego recente).
             if eventos and any(ev.get("evento") == "ciclo" for ev in eventos):
+                if exportar_demanda:
+                    from simulacao.ponte_visao import anexar_janela
+
+                    anexar_janela(
+                        exportar_demanda,
+                        inicio_janela - inicio_sessao,
+                        agora - inicio_sessao,
+                        contagem,
+                    )
                 contagem.clear()
+                inicio_janela = agora
 
             frame = desenhar_camera(
                 frame,
@@ -614,6 +629,12 @@ if __name__ == "__main__":
         action="store_true",
         help="Mostra overlay de debug da auto-calibração (Hough/cluster/linha)",
     )
+    parser.add_argument(
+        "--exportar-demanda",
+        type=str,
+        default=None,
+        help="CSV com a contagem de cada ciclo, para alimentar a simulação SUMO",
+    )
     args = parser.parse_args()
 
     if args.probe:
@@ -633,4 +654,5 @@ if __name__ == "__main__":
         forcar_cpu=args.force_cpu,
         mode=args.mode,
         debug_linha=args.debug_linha,
+        exportar_demanda=args.exportar_demanda,
     )

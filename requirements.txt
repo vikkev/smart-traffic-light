@@ -1,5 +1,7 @@
 pytest
 numpy
 opencv-python
+matplotlib
+eclipse-sumo
 # ultralytics is optional for runtime; install when running full pipeline
 # ultralytics

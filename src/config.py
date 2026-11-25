@@ -63,7 +63,7 @@ Y_A_MAX = 0.85
 Y_MAX = 0.90
 G_MIN = 8.0
 G_MAX = 60.0
-DEMANDA_SATURACAO = 20.0
+DEMANDA_SATURACAO = 20.0  # equivalentes/min que saturam o eixo na prática
 FASES = ("VERDE_A", "AMARELO_A", "VERDE_B", "AMARELO_B")
 
 # Fonte de entrada do protótipo: webcam, rtsp ou video gravado.
