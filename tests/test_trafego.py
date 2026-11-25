@@ -66,6 +66,33 @@ def test_recalculo_nao_altera_verde_em_andamento():
     assert any(evento["evento"] == "ciclo" for evento in eventos)
 
 
+def test_demanda_alta_nao_iguala_os_verdes():
+    # Antes, demanda >= 14 fazia os dois verdes baterem em G_MAX.
+    controlador = ControladorSemaforo()
+    for demanda in (14.0, 20.0, 30.0, 1000.0):
+        tempos = controlador.calcular_tempos(demanda)
+        assert tempos["verde_a"] > tempos["verde_b"] + 5
+
+
+def test_eixos_medidos_repartem_pelo_fluxo():
+    controlador = ControladorSemaforo()
+    carregado = controlador.calcular_tempos(16.0, taxa_b=2.0)
+    assert carregado["verde_a"] > carregado["verde_b"]
+    equilibrado = controlador.calcular_tempos(4.0, taxa_b=4.0)
+    assert equilibrado["verde_a"] == pytest.approx(equilibrado["verde_b"], abs=0.05)
+
+
+def test_taxa_nao_trata_contagem_como_volume():
+    gestor = GerenciadorTrafego()
+    controlador = ControladorSemaforo()
+    curta = gestor.taxa_por_minuto(14.0, 60.0)
+    longa = gestor.taxa_por_minuto(14.0, 180.0)
+    assert curta == pytest.approx(14.0)
+    assert longa == pytest.approx(14.0 / 3.0)
+    assert controlador.calcular_tempos(curta)["verde_a"] > controlador.calcular_tempos(longa)["verde_a"]
+    assert gestor.taxa_por_minuto(10.0, 0.0) == 0.0
+
+
 def test_ciclo_completo_de_fases():
     controlador = ControladorSemaforo()
     controlador.iniciar(5.0)

@@ -1,0 +1,11 @@
+cenario,controle,semente,duracao_s,veiculos_inseridos,veiculos_saidos,espera_media_s,espera_max_s,fila_media_veic,fila_max_veic,throughput_veic_min,paradas_desnecessarias,tempo_verde_a_s,tempo_verde_b_s
+madrugada,fixo,42,900.0,32,30,6.72,26.0,0.239,2,2.0,12,406.0,390.0
+madrugada,atuado,42,900.0,32,32,2.94,13.0,0.104,3,2.133,5,447.0,349.0
+medio,fixo,42,900.0,300,282,9.37,36.0,3.124,7,18.8,218,406.0,390.0
+medio,atuado,42,900.0,300,285,3.33,15.0,1.111,4,19.0,98,311.0,305.0
+pico,fixo,42,900.0,652,605,11.28,36.0,8.17,16,40.333,16,406.0,390.0
+pico,atuado,42,900.0,652,604,10.87,35.0,7.876,15,40.267,2,393.0,391.0
+desbalanceado,fixo,42,900.0,496,447,20.28,46.0,11.19,31,29.8,365,406.0,390.0
+desbalanceado,atuado,42,900.0,496,464,3.76,36.0,2.094,9,30.933,80,580.0,160.0
+visao,fixo,42,900.0,35,33,6.29,35.0,0.246,3,2.2,13,406.0,390.0
+visao,atuado,42,900.0,35,34,3.06,13.0,0.12,3,2.267,6,579.0,193.0

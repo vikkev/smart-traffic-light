@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Trânsito pela direita. Cada aproximação segue reto ou dobra à direita.
+     Conversão à esquerda fica de fora (duas fases só). -->
+<connections>
+    <connection from="n_in" to="s_out" fromLane="0" toLane="0"/>
+    <connection from="n_in" to="w_out" fromLane="0" toLane="0"/>
+    <connection from="s_in" to="n_out" fromLane="0" toLane="0"/>
+    <connection from="s_in" to="e_out" fromLane="0" toLane="0"/>
+    <connection from="e_in" to="w_out" fromLane="0" toLane="0"/>
+    <connection from="e_in" to="n_out" fromLane="0" toLane="0"/>
+    <connection from="w_in" to="e_out" fromLane="0" toLane="0"/>
+    <connection from="w_in" to="s_out" fromLane="0" toLane="0"/>
+</connections>
